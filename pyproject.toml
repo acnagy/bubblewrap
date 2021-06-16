@@ -1,0 +1,26 @@
+[tool.black]
+line-length = 100
+target-version = ['py37']
+include = '''
+\.pyi?$
+| bubblewrap
+'''
+exclude = '''
+(
+  /(
+      \.eggs        
+    | \.git
+    | \.pytest_cache
+    | \.venv
+    | .gitignore
+    | LICENSE
+    | README.md
+    | requirements.txt
+  )/
+)
+'''
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
