@@ -55,3 +55,59 @@ def test_examples_one():
     # order doesn't matter, so the test sorts so we're only checking if we have the same stuff
     # in the output as expected
     assert sorted(collect.collect_tests(test_location, exclude=[])) == sorted(expected)
+
+
+def test__add_test_to_map():
+    root = os.getcwd()
+    example_one = os.path.join(root, "examples", "one")
+
+    test_path = f"{root}/examples/one/tests/test_banana.py"
+
+    exclude = [".git", "__pycache__", "__venv__", "env"]
+    all_files = collect.walk_tree(example_one, exclude)
+    tests = collect.filter_tests(all_files)
+    modules = collect.convert_app_paths_to_modules(set(all_files) - set(tests))
+
+    output = collect._add_test_to_map(test_path, modules, {})
+    expected = {
+        "banana": [
+            f"{root}/examples/one/tests/test_banana.py",
+        ],
+        "blue": [
+            f"{root}/examples/one/tests/test_banana.py",
+        ],
+        "amazing": [
+            f"{root}/examples/one/tests/test_banana.py",
+        ],
+    }
+
+    assert output == expected
+
+
+def test_example_one_end_to_end():
+    root = os.getcwd()
+    example_one = os.path.join(root, "examples", "one")
+    expected = {
+        "banana": [
+            f"{root}/examples/one/tests/test_banana.py",
+            f"{root}/examples/one/tests/test_amazing.py",
+        ],
+        "blue": [
+            f"{root}/examples/one/tests/test_banana.py",
+            f"{root}/examples/one/tests/test_apple.py",
+        ],
+        "amazing": [
+            f"{root}/examples/one/tests/test_banana.py",
+            f"{root}/examples/one/tests/test_amazing.py",
+            f"{root}/examples/one/tests/test_apple.py",
+        ],
+        "script": [
+            f"{root}/examples/one/tests/test_script.py",
+            f"{root}/examples/one/tests/test_apple.py",
+        ],
+        "apple": [f"{root}/examples/one/tests/test_apple.py"],
+    }
+    # lifted from defaults in script invocation wrapper
+    exclude = [".git", "__pycache__", "__venv__", "env"]
+    output = collect.collect_tests(example_one, exclude)
+    assert output == expected
