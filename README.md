@@ -2,6 +2,24 @@
 
 a wrapper around pytest for assessing flakiness and runtime regressions
 
+## How to Use: 
+
+```bash
+# from the bubblewrap root
+$ ./bubblewrap path/to/code
+
+```
+
+e.g.
+
+```bash
+
+$ ./bubblewrap .
+
+```
+
+or, add `bubblewrap` to your `$PATH` and call with just `bubblewrap path/to/code`
+
 ## Local Setup
 
 This project uses Python3.9, `pip` to manage dependencies, and runs in a virtual environment. Install with the following:
@@ -20,13 +38,22 @@ $ pip install -r requirements.txt
 $ deactivate
 ```
 
-### Code Formatting
+## Code Formatting
+
 This project uses Black for code formatting:
 ```bash
 $ python3 -m black .
 
 ```
-The `pyproject.toml` file includes configuration.
+The `pyproject.toml` file includes configuration for Black.
+
+
+And, the project is linted with flake8
+
+```bash 
+$ python3 -m flake8 path/to/code
+
+```
 
 
 ### Tests

@@ -3,25 +3,76 @@
 """
 bubblewrap is a a wrapper around pytest for assessing flakiness and runtime regressions
 
-example invocation: 
+example invocation:
 
 bubblewrap ~/path/to/project --trials 10 --compare-to ffe6831 --fail-on-warn
 """
 
 import os
 import argparse
+import json
 
-from cli import bubblewrap
+import collect
+from utils import log
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        "assess flakiness and runtime regression in tests"
+logger = log.init_logger()
+
+
+def bubblewrap(path, trials, exclude, prev_commit, fail):
+    path = os.path.abspath(path)
+    # collect map of test files + relevant main files on current project
+    logger.info("Collecting test files for %s @ HEAD", path)
+    collected_tests = collect.collect_tests(path, exclude)
+    logger.info("Collected tests:\n%s", json.dumps(collected_tests, indent=2))
+
+    # more to come..
+
+
+def main():
+    parser = argparse.ArgumentParser("assess flakiness and runtime regression in tests")
+
+    parser.add_argument("path", help="add the relative path to the project location")
+    parser.add_argument(
+        "--trials",
+        "-t",
+        metavar="\b",
+        required=False,
+        default=30,
+        type=int,
+        help="number of trials for benchmarking test regresions",
+    )
+    parser.add_argument(
+        "--compare-to",
+        "-c",
+        metavar="\b",
+        required=False,
+        default="HEAD~1",
+        type=str,
+        help="git commit to compare against",
+    )
+    parser.add_argument(
+        "--fail-on-warn",
+        "-f",
+        required=False,
+        action="store_true",
+        help="fail tests if results warn of flakiness/regresions",
+    )
+    parser.add_argument(
+        "--exclude", "-x", action="append", nargs="?", help="directories to exclude"
     )
 
-    parser.add_argument("path", help='add the relative path to the project location')
-    parser.add_argument("--trials", "-t", metavar="\b", required=False, default=30, type=int, help="number of trials for benchmarking test regresions")
-    parser.add_argument("--compare-to", "-c", metavar="\b", required=False, default="HEAD~1", type=str, help="git commit to compare against")
-    parser.add_argument("--fail-on-warn", "-f", required=False, action='store_true', help="fail tests if results warn of flakiness/regresions")
     args = parser.parse_args()
+    if args.exclude is None:
+        args.exclude = [".git", "__pycache__", "__venv__", "env"]
 
-    bubblewrap(path=args.path, trials=args.trials, prev_commit=args.compare_to, fail=args.fail_on_warn)
+    bubblewrap(
+        path=args.path,
+        trials=args.trials,
+        exclude=args.exclude,
+        prev_commit=args.compare_to,
+        fail=args.fail_on_warn,
+    )
+
+
+if __name__ == "__main__":
+    main()
