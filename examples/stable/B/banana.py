@@ -1,7 +1,7 @@
 import os
 import datetime
 
-from B import blue
+from examples.stable.B import blue
 
 
 def hello():

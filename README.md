@@ -2,10 +2,16 @@
 
 a wrapper around pytest for assessing flakiness and runtime regressions
 
-## How to Use: 
+## How to Run: 
 
+First, install depedencies
 ```bash
 # from the bubblewrap root
+# first, install depdencies:
+$ pip3 install -r requirements.txt`
+```
+```bash
+# then, invoke with:
 $ ./bubblewrap path/to/code
 
 ```
@@ -18,7 +24,44 @@ $ ./bubblewrap .
 
 ```
 
-or, add `bubblewrap` to your `$PATH` and call with just `bubblewrap path/to/code`
+or, if you're using add `bubblewrap` to your `$PATH` and call with just `bubblewrap path/to/code`, e.g.:
+
+```bash
+$ PATH="$HOME/path/to/bubblewrap:$PATH"
+
+```
+
+### Demos
+
+This package also has a couple quick demos for testing against: 
+
+```bash
+# from the bubblewrap root
+$ ./bubblewrap examples/stable
+
+```
+
+```bash
+# from the bubblewrap root
+$ ./bubblewrap examples/flake
+
+```
+
+### Usage Notes
+
+As of right now, imports in test modules need to import the _full_ path of the module, e.g.:
+
+```python
+# this is alright: 
+from example.one.A import apple
+# but this is currently supported:
+from A import apple
+```
+
+This'll be changed in the future. 
+
+Also, `bubblewrap` doesn't yet support regression analysis
+
 
 ## Local Setup
 
@@ -61,11 +104,12 @@ $ python3 -m flake8 path/to/code
 Actual unit tests for this project are also run with with [pytest](https://docs.pytest.org/en/stable/). Having installed the `pip` dependencies (see prior section), run with the following:
 
 ```bash
-# unit tests
-$ python3 -m pytest
+# unit tests, ignoring ones in the demo dirs that are designed to flake
+$ python3 -m pytest -vv -k 'not flake' .
 ```
 
 ```bash
 # test coverage report
-$ python3 -m coverage run -m pytest
+$ python3 -m coverage run -m pytest -k 'not flake' .
+$ coverage report -m
 ```

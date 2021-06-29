@@ -21,6 +21,6 @@ exclude = '''
 '''
 
 [tool.pytest.ini_options]
-testpaths = [
-    "tests",
+markers = [
+    "unit: marks tests as unit tests for the project, not demo dirs",
 ]

@@ -4,7 +4,7 @@ import sys
 import datetime
 
 
-import script
+import examples.stable.script as script
 
 
 def test_hello():

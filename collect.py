@@ -61,7 +61,6 @@ def filter_tests(files: List[str]) -> List[str]:
         module = _extract_module_name(file)
         if module.startswith("test_") or module.endswith("_test"):
             tests.append(file)
-
     return tests
 
 
@@ -111,6 +110,12 @@ def _add_test_to_map(
         if isinstance(node, ast.ImportFrom):
             imports.append(node.module)
 
+    # flatten imports - submodules will be named example.subdir.module, but we want just module
+    for index, imp in enumerate(imports):
+        if "." in imp:
+            imp = imp.split(".")
+            imp = imp[len(imp) - 1]
+        imports[index] = imp
     # filter out stdlib and invalid imports - anything that is both an import and a module
     # in this application is something we care about
     imports = set(imports).intersection(app_modules)

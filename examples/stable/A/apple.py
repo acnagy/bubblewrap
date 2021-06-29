@@ -1,6 +1,6 @@
 import os
 
-from B import blue
+from examples.stable.B import blue
 
 
 def hello():

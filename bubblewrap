@@ -13,6 +13,7 @@ import argparse
 import json
 
 import collect
+import run
 from utils import log
 
 logger = log.init_logger()
@@ -24,6 +25,13 @@ def bubblewrap(path, trials, exclude, prev_commit, fail):
     logger.info("Collecting test files for %s @ HEAD", path)
     collected_tests = collect.collect_tests(path, exclude)
     logger.info("Collected tests:\n%s", json.dumps(collected_tests, indent=2))
+
+    logger.info("Running + analyzing unit tests...")
+    execution_results = run.run_tests(path, trials, collected_tests)
+
+    logger.info("Finding max flake_rate...")
+    rate, tests = run.find_flakiest_tests(execution_results)
+    logger.info(f"Flakiest tests found! flake rate: {rate}, results {json.dumps(tests, indent=2)}")
 
     # more to come..
 
