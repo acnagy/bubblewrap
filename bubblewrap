@@ -14,6 +14,8 @@ import json
 
 import collect
 import run
+import analyze
+
 from utils import log
 
 logger = log.init_logger()
@@ -21,19 +23,23 @@ logger = log.init_logger()
 
 def bubblewrap(path, trials, exclude, prev_commit, fail):
     path = os.path.abspath(path)
-    # collect map of test files + relevant main files on current project
     logger.info("Collecting test files for %s @ HEAD", path)
     collected_tests = collect.collect_tests(path, exclude)
-    logger.info("Collected tests:\n%s", json.dumps(collected_tests, indent=2))
+    logger.info(f"Collected {len(collected_tests)} modules' tests")
 
     logger.info("Running + analyzing unit tests...")
     execution_results = run.run_tests(path, trials, collected_tests)
+    logger.info("Completed test execution. Analyzing...")
 
     logger.info("Finding max flake_rate...")
-    rate, tests = run.find_flakiest_tests(execution_results)
-    logger.info(f"Flakiest tests found! flake rate: {rate}, results {json.dumps(tests, indent=2)}")
+    rate, tests = analyze.find_flakiest_modules(execution_results)
+    logger.info(f"Flakiest tests found! rate: {rate}, names: {tests}")
 
-    # more to come..
+    logger.info("Finding slowest tests...")
+    tests = analyze.find_slowest_modules(execution_results)
+    logger.info(f"Slowest modules found: \n{json.dumps(tests, indent=2)}")
+
+    # more to come...
 
 
 def main():
@@ -45,7 +51,7 @@ def main():
         "-t",
         metavar="\b",
         required=False,
-        default=30,
+        default=3,
         type=int,
         help="number of trials for benchmarking test regresions",
     )

@@ -6,10 +6,64 @@ modules test modules are operating on, and return a map of modules to tests that
 import os
 import ast
 import logging
+import multiprocessing
 
 from typing import Dict, List, Set
+from multiprocessing import Pool, cpu_count
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ImportParser:
+    tests: None
+    app_modules: None
+    module_map: None
+
+    def run(self):
+        pool = Pool(processes=cpu_count() // 2)
+        for test in self.tests:
+            pool.apply_async(self._find_imports, args=(test,), callback=self._add_imports_to_map)
+        pool.close()
+        pool.join()
+        return self.module_map
+
+    def _find_imports(self, test_path: str):
+        """
+        walks the abstract syntax tree for a python module (opened from it's fullpath) and
+        identifies all of the modules that it imports
+        """
+        syntax_tree = ast.parse(open(test_path).read())
+        imports = []
+        for node in ast.walk(syntax_tree):
+            if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
+                imports += [self._submodule_name(child.name) for child in node.names]
+            # an import from could be in the form of:
+            # from directory import module
+            # OR
+            # from module import member
+            # so to be sure we don't miss anything, we add the node.module ("from module ..")
+            # we'll filter things that are NOT actual modules in the package tree later
+            if isinstance(node, ast.ImportFrom):
+                imports.append(self._submodule_name(node.module))
+
+        imports = set(imports).intersection(self.app_modules)
+        return (imports, test_path)
+
+    def _add_imports_to_map(self, found_imports: (Set, str)):
+        imports, test_path = found_imports[0], found_imports[1]
+        for module in imports:
+            if module in self.module_map:
+                self.module_map[module].append(test_path)
+            else:
+                self.module_map[module] = [test_path]
+
+    def _submodule_name(self, name: str) -> str:
+        if "." in name:
+            name = name.split(".")
+            name = name[len(name) - 1]
+        return name
 
 
 def collect_tests(path: str, exclude: List) -> Dict[str, List[str]]:
@@ -32,7 +86,8 @@ def collect_tests(path: str, exclude: List) -> Dict[str, List[str]]:
     logger.info("Mapping tests to the application files they cover...")
     app_modules = convert_app_paths_to_modules(app_modules_fullpath)
 
-    return map_imports(tests, app_modules)
+    parser = ImportParser(tests=tests, app_modules=app_modules, module_map={})
+    return parser.run()
 
 
 def walk_tree(path: str, exclude: List) -> List[str]:
@@ -58,7 +113,7 @@ def filter_tests(files: List[str]) -> List[str]:
     """
     tests = []
     for file in files:
-        module = _extract_module_name(file)
+        module = _module_name_from_path(file)
         if module.startswith("test_") or module.endswith("_test"):
             tests.append(file)
     return tests
@@ -71,63 +126,13 @@ def convert_app_paths_to_modules(fullpaths: List[str]) -> Set[str]:
     """
     app_modules = set()
     while fullpaths:
-        module = _extract_module_name(fullpaths.pop())
+        module = _module_name_from_path(fullpaths.pop())
         app_modules.add(module)
 
     return app_modules
 
 
-def map_imports(tests: List[str], app_modules: Set[str]):
-    """
-    identifies the modules that the test files cover, and maps the tests to the
-    modules that they cover
-    """
-    modules_map = {}
-    for test in tests:
-        modules_map = _add_test_to_map(test, app_modules, modules_map)
-
-    return modules_map
-
-
-def _add_test_to_map(
-    test_path: str, app_modules: Set[str], module_map: Dict
-) -> Dict[str, List[str]]:
-    """
-    walks the abstract syntax tree for a python module (opened from it's fullpath) and
-    identifies all of the modules that it imports
-    """
-    syntax_tree = ast.parse(open(test_path).read())
-    imports = []
-    for node in ast.walk(syntax_tree):
-        if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-            imports += [child.name for child in node.names]
-        # an import from could be in the form of:
-        # from directory import module
-        # OR
-        # from module import member
-        # so to be sure we don't miss anything, we add the node.module ("from module ..")
-        # we'll filter things that are NOT actual modules in the package tree later
-        if isinstance(node, ast.ImportFrom):
-            imports.append(node.module)
-
-    # flatten imports - submodules will be named example.subdir.module, but we want just module
-    for index, imp in enumerate(imports):
-        if "." in imp:
-            imp = imp.split(".")
-            imp = imp[len(imp) - 1]
-        imports[index] = imp
-    # filter out stdlib and invalid imports - anything that is both an import and a module
-    # in this application is something we care about
-    imports = set(imports).intersection(app_modules)
-    for app_module in imports:
-        if app_module in module_map:
-            module_map[app_module].append(test_path)
-        else:
-            module_map[app_module] = [test_path]
-    return module_map
-
-
-def _extract_module_name(fullpath: str) -> str:
+def _module_name_from_path(fullpath: str) -> str:
     module = fullpath.split(os.path.sep)
     # strip off .py extension to get module name
     return module[len(module) - 1][:-3]

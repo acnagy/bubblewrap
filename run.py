@@ -3,12 +3,11 @@ import time
 import logging
 import os
 import sys
-import dataclasses
 import json
 
 
 from typing import List, Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pytest import ExitCode
 
 logger = logging.getLogger(__name__)
@@ -28,8 +27,8 @@ class Test:
     project_path: str = ""
     test_path: str = ""
     trials: int = 0
-    latency_sum: int = 0
-    avg_latency: float = 0.0
+    runtime_sum: int = 0
+    avg_runtime: float = 0.0
     passes: int = 0
     pass_rate: float = 0.0
     fails: int = 0
@@ -60,12 +59,12 @@ class Test:
         # trials is selected by the user
         remaining = self.trials
         while remaining:
-            succeeded, latency = self._test(test_dir)
+            succeeded, runtime = self._test(test_dir)
             if succeeded:
                 self.passes += 1
             else:
                 self.fails += 1
-            self.latency_sum += latency
+            self.runtime_sum += runtime
             remaining -= 1
 
         # reset sys defaults so we don't cause unnecessary side effects
@@ -75,18 +74,18 @@ class Test:
         # summarize trial runs
         self._calculate()
 
-    def _test(self, test_dir: str) -> (bool, int):  # pass, fail, latency
+    def _test(self, test_dir: str) -> (bool, int):  # pass, fail, runtime
         """
         this is the method where we actually call pytest for one atomic unit test
         """
         test = os.path.relpath(self.test_path, test_dir)
         start = time.perf_counter()
         retcode = pytest.main([test, "--rootdir", self.project_path])
-        latency = time.perf_counter() - start
-        return retcode is ExitCode.OK, latency
+        runtime = time.perf_counter() - start
+        return retcode is ExitCode.OK, runtime
 
     def _calculate(self):
-        self.avg_latency = self.latency_sum / self.trials
+        self.avg_runtime = self.runtime_sum / self.trials
         self.pass_rate = self.passes / self.trials
         self.fail_rate = self.fails / self.trials
         self.passed = self.pass_rate >= 0.75
@@ -124,65 +123,81 @@ class Module:
     name: str
     test_results: None  # List[all_test_results]
     flake_rate: float = 0.0
-    latency: float = 0.0
+    runtime: float = 0.0
 
     def summarize(self):
         if self.test_results is None:
             self.test_results = []
         for result in self.test_results:
-            self.latency += result.latency_sum
+            self.runtime += result.runtime_sum
             self.flake_rate += result.flakes
         # assumes that all tests are executed with the same number of trials
         # which is currently safe, but this'll get wonky if we can vary that param
-        self.latency /= result.trials
+        self.runtime /= result.trials
         self.flake_rate /= result.trials
 
 
 """
-Represents a collection Modules, with metadata on which modules are the flakiest and the rate at which the
-tests that cover those modules flake.
+Represents a whole executions' worth of modules and the state -- sorted rounded runtimes -- that we
+need to maintain for our fuzy sort later
 """
 
 
 @dataclass
-class ModuleList:
-    flakiest_modules: None
-    modules: None
-    max_flake_rate: float = None
+class ModuleCollection:
+    modules: None  # List[Module]
+    runtimes: None  # sorted List of runtimes
 
-    def find_flakiest(self):
+    def add(self, module: Module):
         """
-        This method finds the flakiest tests and the flake rate from a complete list of Modules -- we don't
-        build this incrementally, though arguably, we could
+        add new module to the list, and insert it's rounded runtime where appropriate
         """
-        modules_list = self.modules
-        self._search(modules_list)
+        self.modules.append(module)
+        self._sort_runtime(module)
 
-    def _search(self, modules: List):
+    def _sort_runtime(self, module: Module):
         """
-        recursively search through the unsorted lists of completed modules to find the flaky tests we want
+        sort the runtimes, rounded. We'll use this in the analysis phase for returning
+        the modules with the slowest tests, including ties
         """
-        if not modules:
-            return
+        runtime = round_runtime(module.runtime)
+        if not self.runtimes:
+            self.runtimes.append(runtime)
+        else:
+            index = self._runtimes_insert_index(runtime, 0, len(self.runtimes) - 1)
+            if index is not None:
+                self.runtimes.insert(index, runtime)
 
-        # if we're at an array of 1, we can assess the rate for whether it's the maximum flake rate
-        # aka whether we've found an immediately solvable outcome
-        if len(modules) == 1:
-            module = modules.pop()
-            if self.max_flake_rate is None or module.flake_rate > self.max_flake_rate:
-                self.max_flake_rate = module.flake_rate
-                self.flakiest_modules = [module]
-            elif module.flake_rate == self.max_flake_rate:
-                self.flakiest_modules.append(module)
-            return
+    def _runtimes_insert_index(self, runtime, low: int, high: int):
+        """
+        this is a modified binary search so we can find where to insert new runtimes and maintain
+        a sorted order of modules' test runtimes
+        """
+        if runtime < self.runtimes[0]:
+            return 0
 
-        midpt = (len(modules) - 1) // 2
-        # if there are 2 elements in this array, midpt will be 0
-        if midpt >= 0:
-            # shift up by 1 to handle when midpt = 0 because we'll slice off the remaining modules to search
-            self._search(modules[: midpt + 1])
-            self._search(modules[midpt + 1 :])
-        return
+        if runtime > self.runtimes[len(self.runtimes) - 1]:
+            return len(self.runtimes)  # we'll want to insert at the end
+
+        midpt = (high + low) // 2
+        # this runtime value is already accounted for
+        if self.runtimes[midpt] == runtime or low >= high:
+            return None
+
+        # bridges the middle - runtime is between previous and midpt, or midpt and next
+        if midpt - 1 >= 0 and self.runtimes[midpt - 1] < runtime < self.runtimes[midpt]:
+            return midpt
+        if (
+            midpt + 1 <= len(self.runtimes) - 1
+            and self.runtimes[midpt] < runtime < self.runtimes[midpt + 1]
+        ):
+            return midpt + 1
+
+        # recurse in the left (lower) or right (upper) wing of unsearched runtimes
+        if runtime < self.runtimes[midpt]:
+            return self._runtimes_insert_index(runtime, low, midpt - 1)
+        else:
+            return self._runtimes_insert_index(runtime, midpt + 1, high)
 
 
 def run_tests(path: str, trials: int, collected: Dict[str, List[str]]) -> List[Module]:
@@ -190,7 +205,7 @@ def run_tests(path: str, trials: int, collected: Dict[str, List[str]]) -> List[M
     This function intakes the tests collected by the collect.collect_tests() function,
     instantiates containing objects, and executes summaries of both tests and modules
     """
-    modules, cache = [], Cache(results={})
+    modules, cache = ModuleCollection(modules=[], runtimes=[]), Cache(results={})
     for module_name, tests in collected.items():
         module = Module(name=module_name, test_results=[])
         for test_path in tests:
@@ -215,21 +230,13 @@ def run_tests(path: str, trials: int, collected: Dict[str, List[str]]) -> List[M
             module.test_results.append(result)
 
         module.summarize()
-        logger.info(
-            f"Calculated {module_name} results: {json.dumps(dataclasses.asdict(module), indent=2)}"
-        )
-        modules.append(module)
+        logger.info(f"Calculated {module_name} results")
+        modules.add(module)
     return modules
 
 
-def find_flakiest_tests(modules: List[Module]) -> (float, Dict):
+def round_runtime(runtime: int) -> float:
     """
-    Wraps the functionality on ModulesList that searches for the flakiest tests
+    helper so we're only setting how  many decimals to round to in one place
     """
-    modules = ModuleList(modules=modules, flakiest_modules=[])
-    modules.find_flakiest()
-
-    rate = modules.max_flake_rate
-    modules = dataclasses.asdict(modules)
-    modules = modules.pop("flakiest_modules", None)
-    return rate, modules
+    return round(runtime, 2)

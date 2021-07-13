@@ -4,10 +4,10 @@ import os
 import collect
 
 
-def test__extract_module_name():
+def test__module_name_from_path():
     test = "/path/to/code/bubblewrap/tests/test_collect.py"
     expected = "test_collect"
-    assert collect._extract_module_name(test) == expected
+    assert collect._module_name_from_path(test) == expected
 
 
 def test_filter_tests():
@@ -57,7 +57,7 @@ def test_examples_stable():
     assert sorted(collect.collect_tests(test_location, exclude=[])) == sorted(expected)
 
 
-def test__add_test_to_map():
+def test_ImportParser_find_imports():
     root = os.getcwd()
     example_stable = os.path.join(root, "examples", "stable")
 
@@ -68,19 +68,37 @@ def test__add_test_to_map():
     tests = collect.filter_tests(all_files)
     modules = collect.convert_app_paths_to_modules(set(all_files) - set(tests))
 
-    output = collect._add_test_to_map(test_path, modules, {})
-    expected = {
-        "banana": [
-            f"{root}/examples/stable/tests/test_banana.py",
-        ],
-        "blue": [
-            f"{root}/examples/stable/tests/test_banana.py",
-        ],
-        "amazing": [
-            f"{root}/examples/stable/tests/test_banana.py",
-        ],
-    }
+    output = collect.ImportParser(tests=tests, app_modules=modules, module_map={})._find_imports(
+        test_path
+    )
+    expected = (
+        {"banana", "amazing", "blue"},
+        f"{root}/examples/stable/tests/test_banana.py",
+    )
+    assert output == expected
 
+
+def test_ImportParser_submodule_name_module():
+    output = collect.ImportParser(tests=None, app_modules=None, module_map=None)._submodule_name(
+        "lizard"
+    )
+    expected = "lizard"
+    assert output == expected
+
+
+def test_ImportParser_submodule_name_submodule():
+    output = collect.ImportParser(tests=None, app_modules=None, module_map=None)._submodule_name(
+        "green.lizard"
+    )
+    expected = "lizard"
+    assert output == expected
+
+
+def test_ImportParser_submodule_name_subsubmodule():
+    output = collect.ImportParser(tests=None, app_modules=None, module_map=None)._submodule_name(
+        "super.green.lizard"
+    )
+    expected = "lizard"
     assert output == expected
 
 
@@ -110,4 +128,4 @@ def test_example_stable_end_to_end():
     # lifted from defaults in script invocation wrapper
     exclude = [".git", "__pycache__", "__venv__", "env"]
     output = collect.collect_tests(example_stable, exclude)
-    assert output == expected
+    assert sorted(output) == sorted(expected)
