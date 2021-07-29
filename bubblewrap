@@ -12,8 +12,9 @@ import os
 import argparse
 import json
 
-import collect
 import run
+import collect
+import summarize
 import analyze
 
 from utils import log
@@ -22,24 +23,31 @@ logger = log.init_logger()
 
 
 def bubblewrap(path, trials, exclude, prev_commit, fail):
-    path = os.path.abspath(path)
-    logger.info("Collecting test files for %s @ HEAD", path)
+    logger.info("Collecting test files, app modules for %s @ HEAD", path)
     collected_tests = collect.collect_tests(path, exclude)
-    logger.info(f"Collected {len(collected_tests)} modules' tests")
+    module_map = collect.map_tests_to_modules(path, exclude, collected_tests)
 
-    logger.info("Running + analyzing unit tests...")
-    execution_results = run.run_tests(path, trials, collected_tests)
-    logger.info("Completed test execution. Analyzing...")
+    logger.info("Running unit tests...")
+    test_results = run.run_tests(path, trials, collected_tests)
+
+    logger.info("Summarizing modules' test results")
+    module_collection = summarize.summarize_module_test_results(module_map, test_results)
 
     logger.info("Finding max flake_rate...")
-    rate, tests = analyze.find_flakiest_modules(execution_results)
+    rate, tests = analyze.find_flakiest_modules(module_collection)
     logger.info(f"Flakiest tests found! rate: {rate}, names: {tests}")
 
     logger.info("Finding slowest tests...")
-    tests = analyze.find_slowest_modules(execution_results)
+    tests = analyze.find_slowest_modules(module_collection)
     logger.info(f"Slowest modules found: \n{json.dumps(tests, indent=2)}")
 
-    # more to come...
+    logger.info("Finding recommendations for optimization...")
+    recommendations = analyze.recommend_tests_for_optimization(test_results)
+    logger.info(
+        f"Consider optimizing {', '.join(recommendations)}, which account(s) for about a half of the test exec runtime!"
+    )
+
+    # more to come
 
 
 def main():

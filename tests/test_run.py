@@ -17,11 +17,6 @@ def paths():
     return example_stable, test_path
 
 
-@pytest.fixture
-def module_name():
-    return "amazing"
-
-
 def test_Test_run(paths):
     project_path, test_path = paths
     output = run.Test(project_path=project_path, test_path=test_path, trials=1)
@@ -45,25 +40,12 @@ def test_Test_run(paths):
     assert output.avg_runtime > 0
 
 
-def test_Module_summarize(paths, module_name):
-    project_path, test_path = paths
-    test = run.Test(project_path=project_path, test_path=test_path, trials=1)
-    test.run()
-    output = run.Module(name=module_name, test_results=[test])
-    output.summarize()
-    expected = run.Module(name=module_name, test_results=[test])
-    expected.flake_rate = 0
-    expected.runtime = output.runtime  # this doesn't matter, so setting as the same
-    assert output == expected
-    assert output.runtime > 0
-
-
 def test_Cache(paths):
     project_path, test_path = paths
     entry = run.Test(project_path=project_path, test_path=test_path, trials=1)
-    cache = run.Cache(results={})
-    cache.put(test_path, entry)
-    assert cache.get(test_path) == entry
+    results = run.Results(tests={})
+    results.put(test_path, entry)
+    assert results.get(test_path) == entry
 
 
 def test_run_tests(paths):
@@ -71,14 +53,5 @@ def test_run_tests(paths):
     collected = collect_tests(project_path, [".git", "__pycache__", "__venv__", "env"])
     module_list = run.run_tests(project_path, 1, collected)
 
-    assert isinstance(module_list.modules, list)
-    assert len(module_list.modules) == 5
-
-    module = module_list.modules.pop()
-    assert isinstance(module, run.Module)
-    assert isinstance(module.name, str)
-    assert isinstance(module.test_results, list)
-
-    test_result = module.test_results.pop()
-    assert isinstance(test_result, run.Test)
-    assert test_result.project_path == project_path
+    assert isinstance(module_list, dict)
+    assert len(module_list.get("tests")) == 4

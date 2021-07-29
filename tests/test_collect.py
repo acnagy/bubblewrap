@@ -30,33 +30,6 @@ def test_filter_tests():
     assert sorted(trial) == sorted(expected)
 
 
-def test_examples_stable():
-    expected = {
-        "banana": [
-            "/path/to/code/bubblewrap/examples/stable/tests/test_banana.py",
-            "/path/to/code/bubblewrap/examples/stable/tests/test_amazing.py",
-        ],
-        "amazing": [
-            "/path/to/code/bubblewrap/examples/stable/tests/test_banana.py",
-            "/path/to/code/bubblewrap/examples/stable/tests/test_amazing.py",
-            "/path/to/code/bubblewrap/examples/stable/tests/test_apple.py",
-        ],
-        "blue": [
-            "/path/to/code/bubblewrap/examples/stable/tests/test_banana.py",
-            "/path/to/code/bubblewrap/examples/stable/tests/test_apple.py",
-        ],
-        "script": [
-            "/path/to/code/bubblewrap/examples/stable/tests/test_script.py",
-            "/path/to/code/bubblewrap/examples/stable/tests/test_apple.py",
-        ],
-        "apple": ["/path/to/code/bubblewrap/examples/stable/tests/test_apple.py"],
-    }
-    test_location = os.path.join(os.path.abspath("."), "examples", "stable")
-    # order doesn't matter, so the test sorts so we're only checking if we have the same stuff
-    # in the output as expected
-    assert sorted(collect.collect_tests(test_location, exclude=[])) == sorted(expected)
-
-
 def test_ImportParser_find_imports():
     root = os.getcwd()
     example_stable = os.path.join(root, "examples", "stable")
@@ -127,5 +100,6 @@ def test_example_stable_end_to_end():
     }
     # lifted from defaults in script invocation wrapper
     exclude = [".git", "__pycache__", "__venv__", "env"]
-    output = collect.collect_tests(example_stable, exclude)
+    tests = collect.collect_tests(example_stable, exclude)
+    output = collect.map_tests_to_modules(example_stable, exclude, tests)
     assert sorted(output) == sorted(expected)

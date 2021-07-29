@@ -2,6 +2,8 @@ import logging
 
 import coloredlogs
 
+from dataclasses import dataclass
+
 
 def init_logger():
     level = logging.INFO

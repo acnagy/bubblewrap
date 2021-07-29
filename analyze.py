@@ -1,10 +1,11 @@
 import logging
 import json
 
-from typing import List, Dict
+from typing import List, Dict, Set
 from dataclasses import dataclass, asdict
+from math import floor
 
-from run import Module, ModuleCollection, round_runtime
+from summarize import Module, ModuleCollection
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ tests that cover those modules flake.
 
 
 @dataclass
-class BubblewrapStats:
+class BubblewrapModuleStats:
     flakiest_modules: None  # List[Module]
     slowest_modules: None  # List[Module]
     runtimes: None  # List[Module]
@@ -40,24 +41,27 @@ class BubblewrapStats:
         (these are unit tests -- they're not gonna be precise to the microseconds)
         """
 
-        # counts the number of times each rounded rime appears in the results, converting
+        # counts the number of times each floored runtime appears in the results, converting
         # self.runtimes to a dict of {runtime: appearance_count}
         self._count_modules_by_runtime()
 
-        # counts the number of results we want to return -- this is top_n, rounded up to account
+        # counts the number of results we want to return -- this is top_n, floored up to account
         # for ties, and sets up self.runtimes to define the allowed results list index for each
         # runtime that appears, converting self.runtimes to {runtime: (start, end)}
         self._count_expected_results(top_n)
 
         results = [None] * self.runtimes_result_count
         for module in self.modules:
-            rounded = round_runtime(module.runtime)
-            start, end = self.runtimes[rounded]
+            floored = floor(module.runtime)
+            start, end = self.runtimes[floored]
             if end < self.runtimes_result_count:
                 results[end] = {
-                    module.name: {"precise_runtime": module.runtime, "rounded_runtime": rounded}
+                    module.name: {
+                        "precise_runtime_ms": module.runtime,
+                        "floored_runtime_ms": floored,
+                    }
                 }
-                self.runtimes[rounded] = [start, end - 1]
+                self.runtimes[floored] = [start, end - 1]
         self.slowest_modules = results
         return self.slowest_modules
 
@@ -92,10 +96,10 @@ class BubblewrapStats:
         count the number of items in each runtime bucket -- build this dict in reverse order
         so we can pop off the end (more efficient)
         """
-        logger.info("counting the modules by rounded runtime")
+        logger.info("counting the modules by floored runtime")
         self.runtimes = {l: 0 for l in self.runtimes}
         for module in self.modules:
-            self.runtimes[round_runtime(module.runtime)] += 1
+            self.runtimes[floor(module.runtime)] += 1
         logger.info(f"done counting")
 
     def _count_expected_results(self, top_n: int):
@@ -105,7 +109,7 @@ class BubblewrapStats:
         which will top_n, including all ties
         """
         logger.info(
-            "prepping expected result count + which indices account for sorted rounded runtime buckets"
+            "prepping expected result count + which indices account for sorted floored runtime buckets"
         )
         result_count, indices_counted = 0, 0
         for runtime, count in self.runtimes.items():
@@ -118,13 +122,73 @@ class BubblewrapStats:
         logger.info(f"done: will return {result_count} results")
 
 
-def find_flakiest_modules(module_list: ModuleCollection) -> (float, Dict):
+"""
+Aggregates raw test results so we can do things like make recommendations for specific tests to optimize
+"""
+
+
+class BubblewrapTestStats:
+    def __init__(self, tests):
+        self.tests = tests
+        self.total_runtime = int(sum([t["runtime_sum"] for t in self.tests]))
+        self.cutoff = self.total_runtime // 2
+        self.cache = []
+
+    def find_cutoff_optimized_set(self) -> Set[str]:
+        """
+        prep cache and find largest number of tests that get close to 50%  - returns the test paths comprising
+        this optimized set of results
+        """
+        self._prep_cache()
+        optimized_set = self._find_cutoff_optimized_set(len(self.tests) - 1, self.cutoff)
+        return optimized_set[1]
+
+    def _prep_cache(self):
+        """
+        builds a table to store prior solutions to the optimization problem for the largest set of tests that
+        account for up to 50% of the total runtime
+        """
+        self.cache = [[None] * (self.cutoff + 1) for _ in range(len(self.tests) + 1)]
+
+    def _find_cutoff_optimized_set(self, test_index, margin_left):
+        """
+        recursive helper function for searching for potential test results to add to our optimal solution
+        """
+        # check if we're at the end or have already passed by here
+        if test_index == 0:
+            return [0, set()]
+        if self.cache[test_index][margin_left] != None:
+            return self.cache[test_index][margin_left]
+
+        new_runtime = self.tests[test_index]["runtime_sum"]
+        new_test = self.tests[test_index]["path"]
+        if new_runtime > margin_left:
+            # skip this bc the runtime pushes us over the cutoff
+            result = self._find_cutoff_optimized_set(test_index - 1, margin_left)
+        else:
+            # figure out which is better - including this new runtime or skipping over it
+            included = self._find_cutoff_optimized_set(test_index - 1, margin_left - new_runtime)
+            included[0] += 1  # increment this to account for including a new test in output set
+            not_included = self._find_cutoff_optimized_set(test_index - 1, margin_left)
+            result = max(included, not_included, key=lambda t: t[1])
+
+            # if we're going to return the variant where we include the new test, then insert
+            # into the optimized result test of test paths that we're building
+            if result == included:
+                included[1].add(new_test)
+
+            # memoize the new result that we've calculated for when we pass by here again
+            self.cache[test_index][margin_left] = result
+        return result
+
+
+def find_flakiest_modules(module_collection: ModuleCollection) -> (float, Dict):
     """
-    Wraps the functionality on BubblewrapStats that searches for the flakiest modules
+    Wraps the functionality on BubblewrapModuleStats that searches for the flakiest modules
     """
-    stats = BubblewrapStats(
-        modules=module_list.modules,
-        runtimes=module_list.runtimes,
+    stats = BubblewrapModuleStats(
+        modules=module_collection.modules,
+        runtimes=module_collection.runtimes,
         flakiest_modules=[],
         slowest_modules=[],
     )
@@ -137,13 +201,13 @@ def find_flakiest_modules(module_list: ModuleCollection) -> (float, Dict):
     return rate, modules
 
 
-def find_slowest_modules(module_list: ModuleCollection):
+def find_slowest_modules(module_collection: ModuleCollection) -> List[Dict]:
     """
-    Wraps the functionality on BubblewrapStats for finding the top_n slowest modules
+    Wraps the functionality on BubblewrapModuleStats for finding the top_n slowest modules
     """
-    stats = BubblewrapStats(
-        modules=module_list.modules,
-        runtimes=module_list.runtimes,
+    stats = BubblewrapModuleStats(
+        modules=module_collection.modules,
+        runtimes=module_collection.runtimes,
         flakiest_modules=[],
         slowest_modules=[],
     )
@@ -151,3 +215,39 @@ def find_slowest_modules(module_list: ModuleCollection):
         "calling analyze.find_slowest_modules(execution_results) to find the top 3 or so slow modules"
     )
     return stats.find_slowest(3)
+
+
+def recommend_tests_for_optimization(test_results: Dict) -> Set[str]:
+    """
+    Makes a recommendation of a set of tests to consider optimizing. This set accounts for around 50% of
+    the time it takes to run tests. This set is *either* the SMALLER of the two possibilities:
+    (1) a set that comprises up to 50% of the test execution time
+    (2) the complement set of tests
+    OR if sets (1) and (2) have the same length, then it is whichever of these accounts for at least 50%
+    of the test runtime. The goal here is to make a workable recommendation, considering that humans want
+    manageable goals and humans will be doing this optimization.
+    """
+    test_results = test_results["tests"]
+    tests, total_runtime = [], 0
+    for path, results in test_results.items():
+        tests.append(
+            {"path": results["test_path"], "runtime_sum": int(results["runtime_sum"])}
+        )  # convert from ms, round to an int (sorry)
+    stats = BubblewrapTestStats(tests=tests)
+
+    test_paths = set([t["path"] for t in tests])
+    up_to_cutoff = stats.find_cutoff_optimized_set()
+    rest_of_tests = test_paths - up_to_cutoff
+
+    if len(up_to_cutoff) == len(rest_of_tests):
+        # up_to_cutoff is optimized for no more than 50% of the total runtime, if the lengths
+        # this list and the complement are the same, then the complement is going to account
+        # at least 50% of the runtime -- a larger fraction
+        return rest_of_tests
+
+    # now we just want to recommend the more managable (aka smaller) set that accounts for
+    # approximately 50% of the time we spend running tests -- people like to fix accomplishable tasks
+    smaller = min(len(up_to_cutoff), len(rest_of_tests))
+    if smaller == len(up_to_cutoff):
+        return up_to_cutoff
+    return rest_of_tests

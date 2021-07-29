@@ -66,18 +66,24 @@ class ImportParser:
         return name
 
 
-def collect_tests(path: str, exclude: List) -> Dict[str, List[str]]:
+def collect_tests(path: str, exclude: List) -> List[str]:
     """
     identifies all the .py application and test files in the requested path,
-    filters them into two separate groups, then maps the application modules
-    to the tests that import (aka cover) them
     """
     logger.info("Walking tree for %s...", path)
     all_files = walk_tree(path, exclude)
 
     logger.info("Filtering for test files...")
     tests = filter_tests(all_files)
+    return tests
 
+
+def map_tests_to_modules(path: str, exclude: List, tests: List[str]) -> Dict[str, List[str]]:
+    """
+    maps the application modules to the tests that import (aka cover) them
+    """
+    logger.info("Walking tree for %s...", path)
+    all_files = walk_tree(path, exclude)
     logger.info("Filtering for application files...")
     # we can use set subtraction here, because we're working with full
     # file paths, which means the file paths must be unique
